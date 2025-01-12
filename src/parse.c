@@ -387,19 +387,6 @@ static void ParseIntermission(sv_t *tv, netmsg_t *m, int to, unsigned int mask)
 	ReadAngle(tv, m);
 }
 
-void ParseSpawnStatic(sv_t *tv, netmsg_t *m, int to, unsigned int mask)
-{
-	if (tv->spawnstatic_count == MAX_STATICENTITIES)
-	{
-		tv->spawnstatic_count--;	// Don't be fatal.
-		Sys_ConPrintf(tv, "Too many static entities\n");
-	}
-
-	ParseEntityState(tv, &tv->spawnstatic[tv->spawnstatic_count], m);
-
-	tv->spawnstatic_count++;
-}
-
 //extern const usercmd_t nullcmd;
 static void ParsePlayerInfo(sv_t *tv, netmsg_t *m, qbool clearoldplayers)
 {
@@ -459,10 +446,10 @@ static void ParsePlayerInfo(sv_t *tv, netmsg_t *m, qbool clearoldplayers)
 	tv->players[num].active = true;
 }
 
-static int readentitynum(netmsg_t *m, unsigned int *retflags)
+static int readentitynum(netmsg_t *m, unsigned int *retflags, unsigned int *retmoreflags)
 {
 	int entnum;
-	unsigned int flags;
+	unsigned int flags, moreflags;
 //	unsigned short moreflags = 0;
 
 	flags = ReadShort(m);
@@ -475,16 +462,19 @@ static int readentitynum(netmsg_t *m, unsigned int *retflags)
 
 	entnum = flags&511;
 	flags &= ~511;
+	moreflags = 0;
 
 	if (flags & U_MOREBITS)
 	{
 		flags |= ReadByte(m);
 
-/*		if (flags & U_EVENMORE)
-			flags |= ReadByte(m)<<16;
-		if (flags & U_YETMORE)
+		if (flags & U_FTE_EVENMORE)
+			moreflags = ReadByte(m)<<16;
+		/*
+		if (flags & U_FTE_YETMORE)
 			flags |= ReadByte(m)<<24;
-*/	}
+		*/
+	}
 
 /*	if (flags & U_ENTITYDBL)
 		entnum += 512;
@@ -492,11 +482,12 @@ static int readentitynum(netmsg_t *m, unsigned int *retflags)
 		entnum += 1024;
 */
 	*retflags = flags;
+	*retmoreflags = moreflags;
 
 	return entnum;
 }
 
-static void ParseEntityDelta(sv_t *tv, netmsg_t *m, entity_state_t *old, entity_state_t *new, unsigned int flags, entity_t *ent, qbool forcerelink)
+static void ParseEntityDelta(sv_t *tv, netmsg_t *m, entity_state_t *old, entity_state_t *new, unsigned int flags, unsigned int moreflags, entity_t *ent, qbool forcerelink)
 {
 	memcpy(new, old, sizeof(entity_state_t));
 
@@ -523,7 +514,42 @@ static void ParseEntityDelta(sv_t *tv, netmsg_t *m, entity_state_t *old, entity_
 		new->origin[2] = ReadCoord(tv, m);
 	if (flags & U_ANGLE3)
 		new->angles[2] = ReadAngle(tv, m);
+	if (moreflags & U_FTE_TRANS)
+		new->trans = ReadByte(m);
+	if (moreflags & U_FTE_COLOURMOD)
+	{
+		new->colourmod[0] = ReadByte(m);
+		new->colourmod[1] = ReadByte(m);
+		new->colourmod[2] = ReadByte(m);
+	}
 }
+
+
+void ParseSpawnStatic(sv_t *tv, netmsg_t *m, int to, unsigned int mask, qbool extended)
+{
+	if (tv->spawnstatic_count == MAX_STATICENTITIES)
+	{
+		tv->spawnstatic_count--;	// Don't be fatal.
+		Sys_ConPrintf(tv, "Too many static entities\n");
+	}
+
+	if (extended)
+	{
+		unsigned int flags, moreflags;
+		int newnum;
+		entity_state_t nullst;
+		memset (&nullst, 0, sizeof(entity_state_t));
+		newnum = readentitynum(m, &flags, &moreflags);
+		ParseEntityDelta(tv, m, &nullst, &tv->spawnstatic[tv->spawnstatic_count], flags, moreflags, &tv->entity[newnum], true);
+	}
+	else
+	{
+		ParseEntityState(tv, &tv->spawnstatic[tv->spawnstatic_count], m);
+	}
+
+	tv->spawnstatic_count++;
+}
+
 
 static int ExpandFrame(unsigned int newmax, frame_t *frame)
 {
@@ -577,7 +603,7 @@ static void ParsePacketEntities(sv_t *tv, netmsg_t *m, int deltaframe)
 	int oldcount;
 	int newnum, oldnum;
 	int newindex, oldindex;
-	unsigned int flags;
+	unsigned int flags, moreflags;
 
 	if (deltaframe != -1)
 		deltaframe &= (MAX_ENTITY_FRAMES-1);
@@ -602,7 +628,7 @@ static void ParsePacketEntities(sv_t *tv, netmsg_t *m, int deltaframe)
 
 	for(;;)
 	{
-		newnum = readentitynum(m, &flags);
+		newnum = readentitynum(m, &flags, &moreflags);
 		if (!newnum)
 		{
 			// End of packet
@@ -652,7 +678,7 @@ static void ParsePacketEntities(sv_t *tv, netmsg_t *m, int deltaframe)
 
 			if (!ExpandFrame(newindex, newframe))
 				break;
-			ParseEntityDelta(tv, m, &tv->entity[newnum].baseline, &newframe->ents[newindex], flags, &tv->entity[newnum], true);
+			ParseEntityDelta(tv, m, &tv->entity[newnum].baseline, &newframe->ents[newindex], flags, moreflags, &tv->entity[newnum], true);
 			newframe->entnums[newindex] = newnum;
 			newindex++;
 		}
@@ -668,7 +694,7 @@ static void ParsePacketEntities(sv_t *tv, netmsg_t *m, int deltaframe)
 			if (!ExpandFrame(newindex, newframe))
 				break;
 
-			ParseEntityDelta(tv, m, &oldframe->ents[oldindex], &newframe->ents[newindex], flags, &tv->entity[newnum], false);
+			ParseEntityDelta(tv, m, &oldframe->ents[oldindex], &newframe->ents[newindex], flags, moreflags, &tv->entity[newnum], false);
 			newframe->entnums[newindex] = newnum;
 			newindex++;
 			oldindex++;
@@ -1291,10 +1317,12 @@ void ParseMessage(sv_t *tv, char *buffer, int length, int to, int mask)
 			}
 			case svc_spawnstatic:
 			{
-				ParseSpawnStatic(tv, &buf, to, mask);
+				ParseSpawnStatic(tv, &buf, to, mask, false);
 				break;
 			}
-			// svc_spawnstatic2	21
+			case svc_fte_spawnstatic2:
+				ParseSpawnStatic(tv, &buf, to, mask, true);
+				break;
 			case svc_spawnbaseline:
 			{
 				ParseBaseline(tv, &buf, to, mask);

@@ -253,7 +253,7 @@ int SendStaticEntities(sv_t *tv, int cursize, netmsg_t *msg, int maxbuffersize, 
 		if (!tv->spawnstatic[i].modelindex)
 			continue;
 
-		WriteByte(msg, svc_spawnstatic);
+		WriteByte(msg, svc_fte_spawnstatic2);
 		WriteEntityState(tv, msg, &tv->spawnstatic[i]);
 	}
 
@@ -301,8 +301,10 @@ void SV_WriteDelta(sv_t* tv, int entnum, const entity_state_t *from, const entit
 {
 	unsigned int i;
 	unsigned int bits;
+	unsigned int evenmorebits;
 
 	bits = 0;
+	evenmorebits = 0;
 	if (from->angles[0] != to->angles[0])
 		bits |= U_ANGLE1;
 	if (from->angles[1] != to->angles[1])
@@ -328,10 +330,20 @@ void SV_WriteDelta(sv_t* tv, int entnum, const entity_state_t *from, const entit
 	if (from->effects != to->effects)
 		bits |= U_EFFECTS;
 
+	if (to->trans != from->trans)
+		evenmorebits |= U_FTE_TRANS;
+	if ((to->colourmod[0] != from->colourmod[0] ||
+		 to->colourmod[1] != from->colourmod[1] ||
+		 to->colourmod[2] != from->colourmod[2]))
+		evenmorebits |= U_FTE_COLOURMOD;
+
 	if (bits & 255)
 		bits |= U_MOREBITS;
 
-
+	if (evenmorebits&0xff00)
+		evenmorebits |= U_FTE_YETMORE;
+	if (evenmorebits&0x00ff)
+		bits |= U_FTE_EVENMORE;
 
 	if (!bits && !force)
 		return;
@@ -341,14 +353,13 @@ void SV_WriteDelta(sv_t* tv, int entnum, const entity_state_t *from, const entit
 
 	if (bits & U_MOREBITS)
 		WriteByte (msg, bits&255);
-/*
-#ifdef PROTOCOLEXTENSIONS
-	if (bits & U_EVENMORE)
+
+	if (bits & U_FTE_EVENMORE)
 		WriteByte (msg, evenmorebits&255);
-	if (evenmorebits & U_YETMORE)
+
+	if (evenmorebits & U_FTE_YETMORE)
 		WriteByte (msg, (evenmorebits>>8)&255);
-#endif
-*/
+
 	if (bits & U_MODEL)
 		WriteByte (msg,	to->modelindex&255);
 	if (bits & U_FRAME)
@@ -371,6 +382,16 @@ void SV_WriteDelta(sv_t* tv, int entnum, const entity_state_t *from, const entit
 		WriteCoord (tv, msg, to->origin[2]);
 	if (bits & U_ANGLE3)
 		WriteAngle (tv, msg, to->angles[2]);
+
+	if (evenmorebits & U_FTE_TRANS)
+		WriteByte (msg, to->trans);
+
+	if (evenmorebits & U_FTE_COLOURMOD)
+	{
+		WriteByte (msg, to->colourmod[0]);
+		WriteByte (msg, to->colourmod[1]);
+		WriteByte (msg, to->colourmod[2]);
+	}
 }
 
 void Prox_SendInitialEnts(sv_t *qtv, oproxy_t *prox, netmsg_t *msg)

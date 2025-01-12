@@ -31,7 +31,7 @@ SVC(svc_spawnstatic)
 
 // 21-30
 
-SVC(svc_spawnstatic2_UNUSED)
+SVC(svc_fte_spawnstatic2)
 SVC(svc_spawnbaseline)
 
 SVC(svc_temp_entity)			// variable

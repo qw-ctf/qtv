@@ -351,6 +351,8 @@ typedef struct
 	float origin[3];
 	float angles[3];
 	unsigned char effects;
+	unsigned char trans;
+	unsigned char colourmod[3];
 } entity_state_t;
 
 typedef struct
